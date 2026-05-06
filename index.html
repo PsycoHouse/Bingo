@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bingo Board mit lokalem Speicher</title>
+  <style>
+    :root {
+      --bg: #f4f6f8;
+      --card: #ffffff;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --primary: #2563eb;
+      --primary-dark: #1d4ed8;
+      --success: #16a34a;
+      --success-bg: #dcfce7;
+      --border: #d1d5db;
+      --danger: #dc2626;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 24px;
+    }
+
+    .app {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 24px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: clamp(2rem, 4vw, 3.2rem);
+    }
+
+    .subtitle {
+      color: var(--muted);
+      margin: 0;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      justify-content: center;
+      align-items: center;
+      margin-bottom: 24px;
+      background: var(--card);
+      padding: 16px;
+      border-radius: 18px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+    }
+
+    .toolbar label {
+      font-weight: 600;
+    }
+
+    select,
+    input[type="text"] {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font: inherit;
+      background: white;
+    }
+
+    button {
+      border: none;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+      background: var(--primary);
+      color: white;
+      transition: 0.2s ease;
+    }
+
+    button:hover {
+      background: var(--primary-dark);
+      transform: translateY(-1px);
+    }
+
+    button.secondary {
+      background: #374151;
+    }
+
+    button.secondary:hover {
+      background: #111827;
+    }
+
+    button.danger {
+      background: var(--danger);
+    }
+
+    button.danger:hover {
+      background: #b91c1c;
+    }
+
+    .status {
+      text-align: center;
+      margin-bottom: 18px;
+      font-weight: 700;
+      color: var(--muted);
+    }
+
+    .bingo-board {
+      display: grid;
+      gap: 12px;
+      margin: 0 auto;
+    }
+
+    .cell {
+      background: var(--card);
+      min-height: 145px;
+      border: 2px solid transparent;
+      border-radius: 18px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+      transition: 0.2s ease;
+    }
+
+    .cell.completed {
+      background: var(--success-bg);
+      border-color: var(--success);
+    }
+
+    .cell.completed textarea {
+      text-decoration: line-through;
+      color: #166534;
+      font-weight: 700;
+    }
+
+    textarea {
+      width: 100%;
+      flex: 1;
+      resize: none;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px;
+      font: inherit;
+      background: rgba(255, 255, 255, 0.8);
+    }
+
+    textarea:focus,
+    select:focus,
+    input:focus {
+      outline: 3px solid rgba(37, 99, 235, 0.25);
+      border-color: var(--primary);
+    }
+
+    .cell-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .cell-actions button {
+      width: 100%;
+      padding: 9px;
+      font-size: 0.95rem;
+    }
+
+    .complete-btn {
+      background: var(--success);
+    }
+
+    .complete-btn:hover {
+      background: #15803d;
+    }
+
+    .hint {
+      max-width: 760px;
+      margin: 24px auto 0;
+      color: var(--muted);
+      text-align: center;
+      line-height: 1.5;
+    }
+
+    @media (max-width: 700px) {
+      body {
+        padding: 14px;
+      }
+
+      .cell {
+        min-height: 120px;
+      }
+
+      .toolbar {
+        align-items: stretch;
+      }
+
+      .toolbar > * {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header>
+      <h1>🎯 Bingo Board</h1>
+      <p class="subtitle">Trage eigene Aufgaben ein, bestätige erledigte Felder und speichere alles lokal im Browser.</p>
+    </header>
+
+    <section class="toolbar" aria-label="Einstellungen">
+      <label for="boardSize">Board-Größe:</label>
+      <select id="boardSize">
+        <option value="3">3 × 3</option>
+        <option value="4">4 × 4</option>
+        <option value="5" selected>5 × 5</option>
+      </select>
+
+      <button id="newBoardBtn" type="button">Neues Board erstellen</button>
+      <button id="clearCompletedBtn" class="secondary" type="button">Erledigungen zurücksetzen</button>
+      <button id="deleteBoardBtn" class="danger" type="button">Alles löschen</button>
+    </section>
+
+    <p id="status" class="status">0 Aufgaben erledigt</p>
+
+    <section id="bingoBoard" class="bingo-board" aria-label="Bingo Board"></section>
+
+    <p class="hint">
+      Deine Eingaben werden automatisch im lokalen Speicher dieses Browsers gespeichert. Das bedeutet: Die Daten bleiben auf diesem Gerät erhalten, bis du sie löschst oder den Browser-Speicher leerst.
+    </p>
+  </main>
+
+  <script>
+    const STORAGE_KEY = "custom-bingo-board-v1";
+
+    const board = document.getElementById("bingoBoard");
+    const boardSizeSelect = document.getElementById("boardSize");
+    const newBoardBtn = document.getElementById("newBoardBtn");
+    const clearCompletedBtn = document.getElementById("clearCompletedBtn");
+    const deleteBoardBtn = document.getElementById("deleteBoardBtn");
+    const statusText = document.getElementById("status");
+
+    let state = loadState() || createEmptyState(5);
+
+    function createEmptyState(size) {
+      return {
+        size,
+        cells: Array.from({ length: size * size }, () => ({
+          text: "",
+          completed: false
+        }))
+      };
+    }
+
+    function saveState() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    }
+
+    function loadState() {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        return saved ? JSON.parse(saved) : null;
+      } catch (error) {
+        console.warn("Gespeichertes Board konnte nicht geladen werden:", error);
+        return null;
+      }
+    }
+
+    function renderBoard() {
+      board.innerHTML = "";
+      board.style.gridTemplateColumns = `repeat(${state.size}, minmax(0, 1fr))`;
+      boardSizeSelect.value = String(state.size);
+
+      state.cells.forEach((cell, index) => {
+        const cellElement = document.createElement("article");
+        cellElement.className = `cell ${cell.completed ? "completed" : ""}`;
+
+        const textarea = document.createElement("textarea");
+        textarea.placeholder = `Aufgabe ${index + 1} eintragen...`;
+        textarea.value = cell.text;
+        textarea.setAttribute("aria-label", `Aufgabe ${index + 1}`);
+        textarea.addEventListener("input", () => {
+          state.cells[index].text = textarea.value;
+          saveState();
+        });
+
+        const actions = document.createElement("div");
+        actions.className = "cell-actions";
+
+        const completeButton = document.createElement("button");
+        completeButton.type = "button";
+        completeButton.className = "complete-btn";
+        completeButton.textContent = cell.completed ? "✓ Erledigt" : "Bestätigen";
+        completeButton.addEventListener("click", () => {
+          state.cells[index].completed = !state.cells[index].completed;
+          saveState();
+          renderBoard();
+        });
+
+        actions.appendChild(completeButton);
+        cellElement.appendChild(textarea);
+        cellElement.appendChild(actions);
+        board.appendChild(cellElement);
+      });
+
+      updateStatus();
+    }
+
+    function updateStatus() {
+      const completed = state.cells.filter(cell => cell.completed).length;
+      const total = state.cells.length;
+      statusText.textContent = `${completed} von ${total} Aufgaben erledigt`;
+    }
+
+    newBoardBtn.addEventListener("click", () => {
+      const selectedSize = Number(boardSizeSelect.value);
+      const hasContent = state.cells.some(cell => cell.text.trim() || cell.completed);
+
+      if (hasContent && !confirm("Das aktuelle Board wird ersetzt. Fortfahren?")) {
+        return;
+      }
+
+      state = createEmptyState(selectedSize);
+      saveState();
+      renderBoard();
+    });
+
+    clearCompletedBtn.addEventListener("click", () => {
+      state.cells = state.cells.map(cell => ({ ...cell, completed: false }));
+      saveState();
+      renderBoard();
+    });
+
+    deleteBoardBtn.addEventListener("click", () => {
+      if (!confirm("Möchtest du wirklich alle Aufgaben und Erledigungen löschen?")) {
+        return;
+      }
+
+      localStorage.removeItem(STORAGE_KEY);
+      state = createEmptyState(Number(boardSizeSelect.value));
+      renderBoard();
+    });
+
+    boardSizeSelect.addEventListener("change", () => {
+      const selectedSize = Number(boardSizeSelect.value);
+      const hasContent = state.cells.some(cell => cell.text.trim() || cell.completed);
+
+      if (hasContent && !confirm("Beim Ändern der Größe wird ein neues leeres Board erstellt. Fortfahren?")) {
+        boardSizeSelect.value = String(state.size);
+        return;
+      }
+
+      state = createEmptyState(selectedSize);
+      saveState();
+      renderBoard();
+    });
+
+    renderBoard();
+  </script>
+</body>
+</html>
