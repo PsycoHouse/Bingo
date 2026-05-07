@@ -32,9 +32,64 @@
       padding: 24px;
     }
 
+    body.login-active {
+      display: grid;
+      place-items: center;
+    }
+
     .app {
       max-width: 1100px;
       margin: 0 auto;
+    }
+
+    .app[hidden],
+    .login-screen[hidden] {
+      display: none;
+    }
+
+    .login-screen {
+      width: min(100%, 420px);
+    }
+
+    .login-card {
+      background: var(--card);
+      border-radius: 24px;
+      box-shadow: 0 20px 45px rgba(15, 23, 42, 0.14);
+      padding: 32px;
+    }
+
+    .login-card h1 {
+      font-size: clamp(2rem, 8vw, 2.8rem);
+      text-align: center;
+    }
+
+    .login-card .subtitle {
+      text-align: center;
+      line-height: 1.5;
+      margin-bottom: 24px;
+    }
+
+    .login-form {
+      display: grid;
+      gap: 16px;
+    }
+
+    .form-field {
+      display: grid;
+      gap: 8px;
+      font-weight: 700;
+    }
+
+    .login-error {
+      min-height: 1.5em;
+      margin: 0;
+      color: var(--danger);
+      font-weight: 700;
+      text-align: center;
+    }
+
+    .login-form button {
+      width: 100%;
     }
 
     header {
@@ -70,7 +125,8 @@
     }
 
     select,
-    input[type="text"] {
+    input[type="text"],
+    input[type="password"] {
       border: 1px solid var(--border);
       border-radius: 10px;
       padding: 10px 12px;
@@ -224,8 +280,28 @@
     }
   </style>
 </head>
-<body>
-  <main class="app">
+<body class="login-active">
+  <section id="loginScreen" class="login-screen" aria-label="Login">
+    <form id="loginForm" class="login-card login-form" novalidate>
+      <h1>🎯 Bingo Login</h1>
+      <p class="subtitle">Bitte melde dich an, um das gemeinsame Bingo Board zu öffnen.</p>
+
+      <label class="form-field" for="username">
+        Username
+        <input id="username" name="username" type="text" autocomplete="username" required />
+      </label>
+
+      <label class="form-field" for="password">
+        Passwort
+        <input id="password" name="password" type="password" autocomplete="current-password" required />
+      </label>
+
+      <p id="loginError" class="login-error" role="alert" aria-live="polite"></p>
+      <button type="submit">Einloggen</button>
+    </form>
+  </section>
+
+  <main id="app" class="app" hidden>
     <header>
       <h1>🎯 Bingo Board</h1>
       <p class="subtitle">Trage eigene Aufgaben ein, bestätige erledigte Felder und synchronisiere alles für alle Nutzer in Firebase.</p>
@@ -276,22 +352,17 @@
     };
 
     const STORAGE_KEY = "custom-bingo-board-v1";
+    const AUTH_STORAGE_KEY = "custom-bingo-authenticated";
     const DATABASE_PATH = "bingo/sharedBoard";
+    const VALID_USERNAME = "admin";
+    const VALID_PASSWORD = "kaesekuchen";
 
-    const app = initializeApp(firebaseConfig);
-    const database = getDatabase(app);
-    const boardRef = ref(database, DATABASE_PATH);
-
-    isAnalyticsSupported()
-      .then((supported) => {
-        if (supported) {
-          getAnalytics(app);
-        }
-      })
-      .catch((error) => {
-        console.warn("Firebase Analytics konnte nicht gestartet werden:", error);
-      });
-
+    const loginScreen = document.getElementById("loginScreen");
+    const loginForm = document.getElementById("loginForm");
+    const loginError = document.getElementById("loginError");
+    const usernameInput = document.getElementById("username");
+    const passwordInput = document.getElementById("password");
+    const appShell = document.getElementById("app");
     const board = document.getElementById("bingoBoard");
     const boardSizeSelect = document.getElementById("boardSize");
     const newBoardBtn = document.getElementById("newBoardBtn");
@@ -300,9 +371,13 @@
     const statusText = document.getElementById("status");
     const connectionStatus = document.getElementById("connectionStatus");
 
+    let app;
+    let database;
+    let boardRef;
     let state = loadCachedState() || createEmptyState(5);
     let lastSavedState = JSON.stringify(state);
     let saveTimeout;
+    let bingoStarted = false;
 
     function createEmptyState(size) {
       return {
@@ -470,31 +545,87 @@
       renderBoard();
     });
 
-    onValue(boardRef, (snapshot) => {
-      const syncedState = normalizeState(snapshot.val());
+    function showBingoApp() {
+      loginScreen.hidden = true;
+      appShell.hidden = false;
+      document.body.classList.remove("login-active");
+    }
 
-      if (!syncedState) {
-        saveState(true);
+    function startBingo() {
+      if (bingoStarted) {
         return;
       }
 
-      const serializedSyncedState = JSON.stringify(syncedState);
-      lastSavedState = serializedSyncedState;
+      bingoStarted = true;
+      app = initializeApp(firebaseConfig);
+      database = getDatabase(app);
+      boardRef = ref(database, DATABASE_PATH);
 
-      if (serializedSyncedState !== JSON.stringify(state)) {
-        state = syncedState;
-        cacheState();
-        renderBoard();
+      isAnalyticsSupported()
+        .then((supported) => {
+          if (supported) {
+            getAnalytics(app);
+          }
+        })
+        .catch((error) => {
+          console.warn("Firebase Analytics konnte nicht gestartet werden:", error);
+        });
+
+      onValue(boardRef, (snapshot) => {
+        const syncedState = normalizeState(snapshot.val());
+
+        if (!syncedState) {
+          saveState(true);
+          return;
+        }
+
+        const serializedSyncedState = JSON.stringify(syncedState);
+        lastSavedState = serializedSyncedState;
+
+        if (serializedSyncedState !== JSON.stringify(state)) {
+          state = syncedState;
+          cacheState();
+          renderBoard();
+        }
+
+        setConnectionStatus("Mit Firebase synchronisiert", "online");
+      }, (error) => {
+        console.error("Firebase-Verbindung fehlgeschlagen:", error);
+        setConnectionStatus("Firebase-Verbindung fehlgeschlagen – lokale Kopie wird angezeigt", "offline");
+      });
+
+      setConnectionStatus("Verbinde mit Firebase...", "syncing");
+      renderBoard();
+    }
+
+    function unlockBingo() {
+      sessionStorage.setItem(AUTH_STORAGE_KEY, "true");
+      showBingoApp();
+      startBingo();
+    }
+
+    loginForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+
+      const username = usernameInput.value.trim();
+      const password = passwordInput.value;
+
+      if (username === VALID_USERNAME && password === VALID_PASSWORD) {
+        loginError.textContent = "";
+        unlockBingo();
+        return;
       }
 
-      setConnectionStatus("Mit Firebase synchronisiert", "online");
-    }, (error) => {
-      console.error("Firebase-Verbindung fehlgeschlagen:", error);
-      setConnectionStatus("Firebase-Verbindung fehlgeschlagen – lokale Kopie wird angezeigt", "offline");
+      loginError.textContent = "Username oder Passwort ist falsch.";
+      passwordInput.value = "";
+      passwordInput.focus();
     });
 
-    setConnectionStatus("Verbinde mit Firebase...", "syncing");
-    renderBoard();
+    if (sessionStorage.getItem(AUTH_STORAGE_KEY) === "true") {
+      unlockBingo();
+    } else {
+      usernameInput.focus();
+    }
   </script>
 </body>
 </html>
