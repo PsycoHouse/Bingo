@@ -212,19 +212,20 @@
 
     .bingo-board {
       display: grid;
-      gap: 10px;
+      grid-auto-rows: minmax(112px, auto);
+      gap: 8px;
       margin: 0 auto;
     }
 
     .cell {
       background: var(--card);
-      min-height: 145px;
+      min-height: 112px;
       border: 2px solid transparent;
-      border-radius: 18px;
-      padding: 12px;
+      border-radius: 16px;
+      padding: 8px;
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 6px;
       box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
       transition: 0.2s ease;
     }
@@ -252,12 +253,16 @@
 
     textarea {
       width: 100%;
-      flex: 1;
+      flex: 1 0 auto;
+      min-height: 62px;
+      overflow: hidden;
       resize: none;
       border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 10px;
+      border-radius: 10px;
+      padding: 7px;
       font: inherit;
+      font-size: clamp(0.72rem, 0.78vw, 0.86rem);
+      line-height: 1.25;
       background: rgba(255, 255, 255, 0.8);
     }
 
@@ -270,15 +275,15 @@
 
     .cell-actions {
       display: flex;
-      gap: 6px;
+      gap: 5px;
     }
 
     .cell-actions button {
       flex: 1 1 0;
       min-width: 0;
-      padding: 7px 6px;
+      padding: 6px 5px;
       border-radius: 8px;
-      font-size: 0.82rem;
+      font-size: 0.74rem;
       line-height: 1.1;
     }
 
@@ -311,8 +316,16 @@
         padding: 14px;
       }
 
+      .bingo-board {
+        grid-auto-rows: minmax(104px, auto);
+      }
+
       .cell {
-        min-height: 120px;
+        min-height: 104px;
+      }
+
+      textarea {
+        font-size: 0.82rem;
       }
 
       .boards-grid {
@@ -579,6 +592,7 @@
           textarea.setAttribute("aria-label", `${title}: Aufgabe ${index + 1}`);
           textarea.addEventListener("input", () => {
             state.boards[id].cells[index].text = textarea.value;
+            resizeTaskField(textarea);
             queueSaveState();
           });
 
@@ -619,6 +633,7 @@
           cellElement.appendChild(textarea);
           cellElement.appendChild(actions);
           element.appendChild(cellElement);
+          resizeTaskField(textarea);
         });
       });
 
@@ -637,6 +652,10 @@
       statusText.textContent = `${completed} von ${total} Aufgaben erledigt`;
     }
 
+    function resizeTaskField(textarea) {
+      textarea.style.height = "auto";
+      textarea.style.height = `${textarea.scrollHeight}px`;
+    }
 
     function hasBoardContent() {
       return boardConfigs.some(({ id }) =>
