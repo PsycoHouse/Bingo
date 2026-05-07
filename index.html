@@ -14,6 +14,9 @@
       --primary-dark: #1d4ed8;
       --success: #16a34a;
       --success-bg: #dcfce7;
+      --selected: #7c3aed;
+      --selected-dark: #6d28d9;
+      --selected-bg: #ede9fe;
       --border: #d1d5db;
       --danger: #dc2626;
       --warning: #d97706;
@@ -205,8 +208,18 @@
       transition: 0.2s ease;
     }
 
+    .cell.selected {
+      background: var(--selected-bg);
+      border-color: var(--selected);
+    }
+
     .cell.completed {
       background: var(--success-bg);
+      border-color: var(--success);
+    }
+
+    .cell.selected.completed {
+      background: linear-gradient(135deg, var(--selected-bg), var(--success-bg));
       border-color: var(--success);
     }
 
@@ -243,6 +256,14 @@
       width: 100%;
       padding: 9px;
       font-size: 0.95rem;
+    }
+
+    .select-btn {
+      background: var(--selected);
+    }
+
+    .select-btn:hover {
+      background: var(--selected-dark);
     }
 
     .complete-btn {
@@ -384,6 +405,7 @@
         size,
         cells: Array.from({ length: size * size }, () => ({
           text: "",
+          selected: false,
           completed: false
         }))
       };
@@ -400,6 +422,7 @@
         const cell = value.cells[index] || {};
         return {
           text: typeof cell.text === "string" ? cell.text : "",
+          selected: Boolean(cell.selected),
           completed: Boolean(cell.completed)
         };
       });
@@ -425,6 +448,11 @@
       clearTimeout(saveTimeout);
       cacheState();
       saveTimeout = setTimeout(saveState, 350);
+    }
+
+    function flushSaveState() {
+      clearTimeout(saveTimeout);
+      saveState();
     }
 
     async function saveState(force = false) {
@@ -462,7 +490,11 @@
 
       state.cells.forEach((cell, index) => {
         const cellElement = document.createElement("article");
-        cellElement.className = `cell ${cell.completed ? "completed" : ""}`;
+        cellElement.className = [
+          "cell",
+          cell.selected ? "selected" : "",
+          cell.completed ? "completed" : ""
+        ].filter(Boolean).join(" ");
 
         const textarea = document.createElement("textarea");
         textarea.placeholder = `Aufgabe ${index + 1} eintragen...`;
@@ -473,19 +505,39 @@
           queueSaveState();
         });
 
+        textarea.addEventListener("change", () => {
+          state.cells[index].text = textarea.value;
+          flushSaveState();
+        });
+
         const actions = document.createElement("div");
         actions.className = "cell-actions";
+
+        const selectButton = document.createElement("button");
+        selectButton.type = "button";
+        selectButton.className = "select-btn";
+        selectButton.textContent = cell.selected ? "✓ Selected" : "Select";
+        selectButton.setAttribute(
+          "aria-pressed",
+          cell.selected ? "true" : "false"
+        );
+        selectButton.addEventListener("click", () => {
+          state.cells[index].selected = !state.cells[index].selected;
+          saveState();
+          renderBoard();
+        });
 
         const completeButton = document.createElement("button");
         completeButton.type = "button";
         completeButton.className = "complete-btn";
-        completeButton.textContent = cell.completed ? "✓ Erledigt" : "Bestätigen";
+        completeButton.textContent = cell.completed ? "✓ Erledigt" : "Erledigt";
         completeButton.addEventListener("click", () => {
           state.cells[index].completed = !state.cells[index].completed;
           saveState();
           renderBoard();
         });
 
+        actions.appendChild(selectButton);
         actions.appendChild(completeButton);
         cellElement.appendChild(textarea);
         cellElement.appendChild(actions);
@@ -503,7 +555,9 @@
 
     newBoardBtn.addEventListener("click", () => {
       const selectedSize = Number(boardSizeSelect.value);
-      const hasContent = state.cells.some(cell => cell.text.trim() || cell.completed);
+      const hasContent = state.cells.some(
+        cell => cell.text.trim() || cell.selected || cell.completed
+      );
 
       if (hasContent && !confirm("Das aktuelle Board wird für alle Nutzer ersetzt. Fortfahren?")) {
         return;
@@ -533,7 +587,9 @@
 
     boardSizeSelect.addEventListener("change", () => {
       const selectedSize = Number(boardSizeSelect.value);
-      const hasContent = state.cells.some(cell => cell.text.trim() || cell.completed);
+      const hasContent = state.cells.some(
+        cell => cell.text.trim() || cell.selected || cell.completed
+      );
 
       if (hasContent && !confirm("Beim Ändern der Größe wird ein neues leeres Board für alle Nutzer erstellt. Fortfahren?")) {
         boardSizeSelect.value = String(state.size);
