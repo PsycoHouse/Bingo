@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Bingo Board mit Firebase-Sync</title>
+  <title>Zwei Bingo Boards mit Firebase-Sync</title>
   <style>
     :root {
       --bg: #f4f6f8;
@@ -41,7 +41,7 @@
     }
 
     .app {
-      max-width: 1100px;
+      max-width: 1500px;
       margin: 0 auto;
     }
 
@@ -189,9 +189,30 @@
       color: var(--danger);
     }
 
+    .boards-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 24px;
+      align-items: start;
+    }
+
+    .bingo-panel {
+      background: rgba(255, 255, 255, 0.55);
+      border: 1px solid rgba(209, 213, 219, 0.8);
+      border-radius: 24px;
+      padding: 18px;
+      box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+    }
+
+    .bingo-panel h2 {
+      margin: 0 0 16px;
+      text-align: center;
+      font-size: clamp(1.4rem, 2.2vw, 2rem);
+    }
+
     .bingo-board {
       display: grid;
-      gap: 12px;
+      gap: 10px;
       margin: 0 auto;
     }
 
@@ -291,6 +312,10 @@
         min-height: 120px;
       }
 
+      .boards-grid {
+        grid-template-columns: 1fr;
+      }
+
       .toolbar {
         align-items: stretch;
       }
@@ -305,7 +330,7 @@
   <section id="loginScreen" class="login-screen" aria-label="Login">
     <form id="loginForm" class="login-card login-form" novalidate>
       <h1>🎯 Bingo Login</h1>
-      <p class="subtitle">Bitte melde dich an, um das gemeinsame Bingo Board zu öffnen.</p>
+      <p class="subtitle">Bitte melde dich an, um die gemeinsamen Bingo Boards zu öffnen.</p>
 
       <label class="form-field" for="username">
         Username
@@ -324,8 +349,8 @@
 
   <main id="app" class="app" hidden>
     <header>
-      <h1>🎯 Bingo Board</h1>
-      <p class="subtitle">Trage eigene Aufgaben ein, bestätige erledigte Felder und synchronisiere alles für alle Nutzer in Firebase.</p>
+      <h1>🎯 Bingo Boards</h1>
+      <p class="subtitle">Tragt eigene Aufgaben für Myriams und Adrians Bingo ein, bestätigt erledigte Felder und synchronisiert alles für alle Nutzer in Firebase.</p>
     </header>
 
     <section class="toolbar" aria-label="Einstellungen">
@@ -336,7 +361,7 @@
         <option value="5" selected>5 × 5</option>
       </select>
 
-      <button id="newBoardBtn" type="button">Neues Board erstellen</button>
+      <button id="newBoardBtn" type="button">Neue Boards erstellen</button>
       <button id="clearCompletedBtn" class="secondary" type="button">Erledigungen zurücksetzen</button>
       <button id="deleteBoardBtn" class="danger" type="button">Alles löschen</button>
     </section>
@@ -344,10 +369,20 @@
     <p id="connectionStatus" class="status">Verbinde mit Firebase...</p>
     <p id="status" class="status">0 Aufgaben erledigt</p>
 
-    <section id="bingoBoard" class="bingo-board" aria-label="Bingo Board"></section>
+    <section class="boards-grid" aria-label="Bingo Boards">
+      <section class="bingo-panel" aria-labelledby="myriamBingoTitle">
+        <h2 id="myriamBingoTitle">Myriams Bingo</h2>
+        <div id="myriamBingoBoard" class="bingo-board" aria-label="Myriams Bingo Board"></div>
+      </section>
+
+      <section class="bingo-panel" aria-labelledby="adrianBingoTitle">
+        <h2 id="adrianBingoTitle">Adrians Bingo</h2>
+        <div id="adrianBingoBoard" class="bingo-board" aria-label="Adrians Bingo Board"></div>
+      </section>
+    </section>
 
     <p class="hint">
-      Deine Eingaben werden automatisch in Firebase gespeichert und in Echtzeit mit allen anderen Nutzern synchronisiert, die diese Website öffnen.
+      Eure Eingaben werden automatisch in Firebase gespeichert und in Echtzeit mit allen anderen Nutzern synchronisiert, die diese Website öffnen.
     </p>
   </main>
 
@@ -372,7 +407,8 @@
       measurementId: "G-KLG9K2LN9X"
     };
 
-    const STORAGE_KEY = "custom-bingo-board-v1";
+    const STORAGE_KEY = "custom-bingo-board-v2";
+    const LEGACY_STORAGE_KEY = "custom-bingo-board-v1";
     const AUTH_STORAGE_KEY = "custom-bingo-authenticated";
     const DATABASE_PATH = "bingo/sharedBoard";
     const VALID_USERNAME = "admin";
@@ -384,7 +420,18 @@
     const usernameInput = document.getElementById("username");
     const passwordInput = document.getElementById("password");
     const appShell = document.getElementById("app");
-    const board = document.getElementById("bingoBoard");
+    const boardConfigs = [
+      {
+        id: "myriam",
+        title: "Myriams Bingo",
+        element: document.getElementById("myriamBingoBoard")
+      },
+      {
+        id: "adrian",
+        title: "Adrians Bingo",
+        element: document.getElementById("adrianBingoBoard")
+      }
+    ];
     const boardSizeSelect = document.getElementById("boardSize");
     const newBoardBtn = document.getElementById("newBoardBtn");
     const clearCompletedBtn = document.getElementById("clearCompletedBtn");
@@ -400,34 +447,59 @@
     let saveTimeout;
     let bingoStarted = false;
 
-    function createEmptyState(size) {
+    function createEmptyCell() {
       return {
-        size,
-        cells: Array.from({ length: size * size }, () => ({
-          text: "",
-          selected: false,
-          completed: false
-        }))
+        text: "",
+        selected: false,
+        completed: false
       };
     }
 
-    function normalizeState(value) {
-      if (!value || !Number.isInteger(value.size) || !Array.isArray(value.cells)) {
-        return null;
-      }
+    function createEmptyCells(size) {
+      return Array.from({ length: size * size }, createEmptyCell);
+    }
 
-      const size = Math.min(Math.max(value.size, 3), 5);
+    function createEmptyState(size) {
+      return {
+        size,
+        boards: Object.fromEntries(
+          boardConfigs.map(({ id }) => [id, { cells: createEmptyCells(size) }])
+        )
+      };
+    }
+
+    function normalizeCells(cells, size) {
+      const sourceCells = Array.isArray(cells) ? cells : [];
       const cellCount = size * size;
-      const cells = Array.from({ length: cellCount }, (_, index) => {
-        const cell = value.cells[index] || {};
+
+      return Array.from({ length: cellCount }, (_, index) => {
+        const cell = sourceCells[index] || {};
         return {
           text: typeof cell.text === "string" ? cell.text : "",
           selected: Boolean(cell.selected),
           completed: Boolean(cell.completed)
         };
       });
+    }
 
-      return { size, cells };
+    function normalizeState(value) {
+      if (!value || !Number.isInteger(value.size)) {
+        return null;
+      }
+
+      const size = Math.min(Math.max(value.size, 3), 5);
+      const boards = Object.fromEntries(
+        boardConfigs.map(({ id }) => [
+          id,
+          { cells: normalizeCells(value.boards?.[id]?.cells, size) }
+        ])
+      );
+
+      if (!value.boards && Array.isArray(value.cells)) {
+        boards.myriam.cells = normalizeCells(value.cells, size);
+      }
+
+      return { size, boards };
     }
 
     function cacheState() {
@@ -436,7 +508,7 @@
 
     function loadCachedState() {
       try {
-        const saved = localStorage.getItem(STORAGE_KEY);
+        const saved = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
         return normalizeState(saved ? JSON.parse(saved) : null);
       } catch (error) {
         console.warn("Gespeichertes Board konnte nicht geladen werden:", error);
@@ -484,82 +556,96 @@
     }
 
     function renderBoard() {
-      board.innerHTML = "";
-      board.style.gridTemplateColumns = `repeat(${state.size}, minmax(0, 1fr))`;
       boardSizeSelect.value = String(state.size);
 
-      state.cells.forEach((cell, index) => {
-        const cellElement = document.createElement("article");
-        cellElement.className = [
-          "cell",
-          cell.selected ? "selected" : "",
-          cell.completed ? "completed" : ""
-        ].filter(Boolean).join(" ");
+      boardConfigs.forEach(({ id, title, element }) => {
+        element.innerHTML = "";
+        element.style.gridTemplateColumns = `repeat(${state.size}, minmax(0, 1fr))`;
 
-        const textarea = document.createElement("textarea");
-        textarea.placeholder = `Aufgabe ${index + 1} eintragen...`;
-        textarea.value = cell.text;
-        textarea.setAttribute("aria-label", `Aufgabe ${index + 1}`);
-        textarea.addEventListener("input", () => {
-          state.cells[index].text = textarea.value;
-          queueSaveState();
+        state.boards[id].cells.forEach((cell, index) => {
+          const cellElement = document.createElement("article");
+          cellElement.className = [
+            "cell",
+            cell.selected ? "selected" : "",
+            cell.completed ? "completed" : ""
+          ].filter(Boolean).join(" ");
+
+          const textarea = document.createElement("textarea");
+          textarea.placeholder = `Aufgabe ${index + 1} eintragen...`;
+          textarea.value = cell.text;
+          textarea.setAttribute("aria-label", `${title}: Aufgabe ${index + 1}`);
+          textarea.addEventListener("input", () => {
+            state.boards[id].cells[index].text = textarea.value;
+            queueSaveState();
+          });
+
+          textarea.addEventListener("change", () => {
+            state.boards[id].cells[index].text = textarea.value;
+            flushSaveState();
+          });
+
+          const actions = document.createElement("div");
+          actions.className = "cell-actions";
+
+          const selectButton = document.createElement("button");
+          selectButton.type = "button";
+          selectButton.className = "select-btn";
+          selectButton.textContent = cell.selected ? "✓ Selected" : "Select";
+          selectButton.setAttribute(
+            "aria-pressed",
+            cell.selected ? "true" : "false"
+          );
+          selectButton.addEventListener("click", () => {
+            state.boards[id].cells[index].selected = !state.boards[id].cells[index].selected;
+            saveState();
+            renderBoard();
+          });
+
+          const completeButton = document.createElement("button");
+          completeButton.type = "button";
+          completeButton.className = "complete-btn";
+          completeButton.textContent = cell.completed ? "✓ Erledigt" : "Erledigt";
+          completeButton.addEventListener("click", () => {
+            state.boards[id].cells[index].completed = !state.boards[id].cells[index].completed;
+            saveState();
+            renderBoard();
+          });
+
+          actions.appendChild(selectButton);
+          actions.appendChild(completeButton);
+          cellElement.appendChild(textarea);
+          cellElement.appendChild(actions);
+          element.appendChild(cellElement);
         });
-
-        textarea.addEventListener("change", () => {
-          state.cells[index].text = textarea.value;
-          flushSaveState();
-        });
-
-        const actions = document.createElement("div");
-        actions.className = "cell-actions";
-
-        const selectButton = document.createElement("button");
-        selectButton.type = "button";
-        selectButton.className = "select-btn";
-        selectButton.textContent = cell.selected ? "✓ Selected" : "Select";
-        selectButton.setAttribute(
-          "aria-pressed",
-          cell.selected ? "true" : "false"
-        );
-        selectButton.addEventListener("click", () => {
-          state.cells[index].selected = !state.cells[index].selected;
-          saveState();
-          renderBoard();
-        });
-
-        const completeButton = document.createElement("button");
-        completeButton.type = "button";
-        completeButton.className = "complete-btn";
-        completeButton.textContent = cell.completed ? "✓ Erledigt" : "Erledigt";
-        completeButton.addEventListener("click", () => {
-          state.cells[index].completed = !state.cells[index].completed;
-          saveState();
-          renderBoard();
-        });
-
-        actions.appendChild(selectButton);
-        actions.appendChild(completeButton);
-        cellElement.appendChild(textarea);
-        cellElement.appendChild(actions);
-        board.appendChild(cellElement);
       });
 
       updateStatus();
     }
 
     function updateStatus() {
-      const completed = state.cells.filter(cell => cell.completed).length;
-      const total = state.cells.length;
+      const completed = boardConfigs.reduce(
+        (sum, { id }) => sum + state.boards[id].cells.filter(cell => cell.completed).length,
+        0
+      );
+      const total = boardConfigs.reduce(
+        (sum, { id }) => sum + state.boards[id].cells.length,
+        0
+      );
       statusText.textContent = `${completed} von ${total} Aufgaben erledigt`;
+    }
+
+
+    function hasBoardContent() {
+      return boardConfigs.some(({ id }) =>
+        state.boards[id].cells.some(cell => cell.text.trim() || cell.selected || cell.completed)
+      );
     }
 
     newBoardBtn.addEventListener("click", () => {
       const selectedSize = Number(boardSizeSelect.value);
-      const hasContent = state.cells.some(
-        cell => cell.text.trim() || cell.selected || cell.completed
-      );
+      const hasContent = hasBoardContent();
 
-      if (hasContent && !confirm("Das aktuelle Board wird für alle Nutzer ersetzt. Fortfahren?")) {
+      if (hasContent && !confirm("Die aktuellen Boards werden für alle Nutzer ersetzt. Fortfahren?")) {
         return;
       }
 
@@ -569,7 +655,9 @@
     });
 
     clearCompletedBtn.addEventListener("click", () => {
-      state.cells = state.cells.map(cell => ({ ...cell, completed: false }));
+      boardConfigs.forEach(({ id }) => {
+        state.boards[id].cells = state.boards[id].cells.map(cell => ({ ...cell, completed: false }));
+      });
       saveState();
       renderBoard();
     });
@@ -581,15 +669,14 @@
 
       state = createEmptyState(Number(boardSizeSelect.value));
       localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(LEGACY_STORAGE_KEY);
       saveState();
       renderBoard();
     });
 
     boardSizeSelect.addEventListener("change", () => {
       const selectedSize = Number(boardSizeSelect.value);
-      const hasContent = state.cells.some(
-        cell => cell.text.trim() || cell.selected || cell.completed
-      );
+      const hasContent = hasBoardContent();
 
       if (hasContent && !confirm("Beim Ändern der Größe wird ein neues leeres Board für alle Nutzer erstellt. Fortfahren?")) {
         boardSizeSelect.value = String(state.size);
