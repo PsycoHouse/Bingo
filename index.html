@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Bingo Board mit lokalem Speicher</title>
+  <title>Bingo Board mit Firebase-Sync</title>
   <style>
     :root {
       --bg: #f4f6f8;
@@ -16,6 +16,7 @@
       --success-bg: #dcfce7;
       --border: #d1d5db;
       --danger: #dc2626;
+      --warning: #d97706;
     }
 
     * {
@@ -117,6 +118,18 @@
       color: var(--muted);
     }
 
+    #connectionStatus[data-status="online"] {
+      color: var(--success);
+    }
+
+    #connectionStatus[data-status="syncing"] {
+      color: var(--warning);
+    }
+
+    #connectionStatus[data-status="offline"] {
+      color: var(--danger);
+    }
+
     .bingo-board {
       display: grid;
       gap: 12px;
@@ -215,7 +228,7 @@
   <main class="app">
     <header>
       <h1>🎯 Bingo Board</h1>
-      <p class="subtitle">Trage eigene Aufgaben ein, bestätige erledigte Felder und speichere alles lokal im Browser.</p>
+      <p class="subtitle">Trage eigene Aufgaben ein, bestätige erledigte Felder und synchronisiere alles für alle Nutzer in Firebase.</p>
     </header>
 
     <section class="toolbar" aria-label="Einstellungen">
@@ -231,17 +244,53 @@
       <button id="deleteBoardBtn" class="danger" type="button">Alles löschen</button>
     </section>
 
+    <p id="connectionStatus" class="status">Verbinde mit Firebase...</p>
     <p id="status" class="status">0 Aufgaben erledigt</p>
 
     <section id="bingoBoard" class="bingo-board" aria-label="Bingo Board"></section>
 
     <p class="hint">
-      Deine Eingaben werden automatisch im lokalen Speicher dieses Browsers gespeichert. Das bedeutet: Die Daten bleiben auf diesem Gerät erhalten, bis du sie löschst oder den Browser-Speicher leerst.
+      Deine Eingaben werden automatisch in Firebase gespeichert und in Echtzeit mit allen anderen Nutzern synchronisiert, die diese Website öffnen.
     </p>
   </main>
 
-  <script>
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+    import { getAnalytics, isSupported as isAnalyticsSupported } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-analytics.js";
+    import {
+      getDatabase,
+      onValue,
+      ref,
+      set
+    } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyDDPvlr7f36AWQ47K_HhHrsu9_AOLPtJY0",
+      authDomain: "zufallsauswahl.firebaseapp.com",
+      databaseURL: "https://zufallsauswahl-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId: "zufallsauswahl",
+      storageBucket: "zufallsauswahl.firebasestorage.app",
+      messagingSenderId: "948409201568",
+      appId: "1:948409201568:web:b80a2a422130dde3976ac5",
+      measurementId: "G-KLG9K2LN9X"
+    };
+
     const STORAGE_KEY = "custom-bingo-board-v1";
+    const DATABASE_PATH = "bingo/sharedBoard";
+
+    const app = initializeApp(firebaseConfig);
+    const database = getDatabase(app);
+    const boardRef = ref(database, DATABASE_PATH);
+
+    isAnalyticsSupported()
+      .then((supported) => {
+        if (supported) {
+          getAnalytics(app);
+        }
+      })
+      .catch((error) => {
+        console.warn("Firebase Analytics konnte nicht gestartet werden:", error);
+      });
 
     const board = document.getElementById("bingoBoard");
     const boardSizeSelect = document.getElementById("boardSize");
@@ -249,8 +298,11 @@
     const clearCompletedBtn = document.getElementById("clearCompletedBtn");
     const deleteBoardBtn = document.getElementById("deleteBoardBtn");
     const statusText = document.getElementById("status");
+    const connectionStatus = document.getElementById("connectionStatus");
 
-    let state = loadState() || createEmptyState(5);
+    let state = loadCachedState() || createEmptyState(5);
+    let lastSavedState = JSON.stringify(state);
+    let saveTimeout;
 
     function createEmptyState(size) {
       return {
@@ -262,18 +314,70 @@
       };
     }
 
-    function saveState() {
+    function normalizeState(value) {
+      if (!value || !Number.isInteger(value.size) || !Array.isArray(value.cells)) {
+        return null;
+      }
+
+      const size = Math.min(Math.max(value.size, 3), 5);
+      const cellCount = size * size;
+      const cells = Array.from({ length: cellCount }, (_, index) => {
+        const cell = value.cells[index] || {};
+        return {
+          text: typeof cell.text === "string" ? cell.text : "",
+          completed: Boolean(cell.completed)
+        };
+      });
+
+      return { size, cells };
+    }
+
+    function cacheState() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     }
 
-    function loadState() {
+    function loadCachedState() {
       try {
         const saved = localStorage.getItem(STORAGE_KEY);
-        return saved ? JSON.parse(saved) : null;
+        return normalizeState(saved ? JSON.parse(saved) : null);
       } catch (error) {
         console.warn("Gespeichertes Board konnte nicht geladen werden:", error);
         return null;
       }
+    }
+
+    function queueSaveState() {
+      clearTimeout(saveTimeout);
+      cacheState();
+      saveTimeout = setTimeout(saveState, 350);
+    }
+
+    async function saveState(force = false) {
+      const serializedState = JSON.stringify(state);
+
+      if (!force && serializedState === lastSavedState) {
+        return;
+      }
+
+      cacheState();
+      setConnectionStatus("Speichere Änderungen...", "syncing");
+
+      try {
+        await set(boardRef, {
+          ...state,
+          updatedAt: Date.now()
+        });
+        lastSavedState = serializedState;
+        setConnectionStatus("Mit Firebase synchronisiert", "online");
+      } catch (error) {
+        console.error("Board konnte nicht in Firebase gespeichert werden:", error);
+        setConnectionStatus("Firebase-Speichern fehlgeschlagen – lokale Kopie bleibt erhalten", "offline");
+      }
+    }
+
+    function setConnectionStatus(message, status) {
+      connectionStatus.textContent = message;
+      connectionStatus.dataset.status = status;
     }
 
     function renderBoard() {
@@ -291,7 +395,7 @@
         textarea.setAttribute("aria-label", `Aufgabe ${index + 1}`);
         textarea.addEventListener("input", () => {
           state.cells[index].text = textarea.value;
-          saveState();
+          queueSaveState();
         });
 
         const actions = document.createElement("div");
@@ -326,7 +430,7 @@
       const selectedSize = Number(boardSizeSelect.value);
       const hasContent = state.cells.some(cell => cell.text.trim() || cell.completed);
 
-      if (hasContent && !confirm("Das aktuelle Board wird ersetzt. Fortfahren?")) {
+      if (hasContent && !confirm("Das aktuelle Board wird für alle Nutzer ersetzt. Fortfahren?")) {
         return;
       }
 
@@ -342,12 +446,13 @@
     });
 
     deleteBoardBtn.addEventListener("click", () => {
-      if (!confirm("Möchtest du wirklich alle Aufgaben und Erledigungen löschen?")) {
+      if (!confirm("Möchtest du wirklich alle Aufgaben und Erledigungen für alle Nutzer löschen?")) {
         return;
       }
 
-      localStorage.removeItem(STORAGE_KEY);
       state = createEmptyState(Number(boardSizeSelect.value));
+      localStorage.removeItem(STORAGE_KEY);
+      saveState();
       renderBoard();
     });
 
@@ -355,7 +460,7 @@
       const selectedSize = Number(boardSizeSelect.value);
       const hasContent = state.cells.some(cell => cell.text.trim() || cell.completed);
 
-      if (hasContent && !confirm("Beim Ändern der Größe wird ein neues leeres Board erstellt. Fortfahren?")) {
+      if (hasContent && !confirm("Beim Ändern der Größe wird ein neues leeres Board für alle Nutzer erstellt. Fortfahren?")) {
         boardSizeSelect.value = String(state.size);
         return;
       }
@@ -365,6 +470,30 @@
       renderBoard();
     });
 
+    onValue(boardRef, (snapshot) => {
+      const syncedState = normalizeState(snapshot.val());
+
+      if (!syncedState) {
+        saveState(true);
+        return;
+      }
+
+      const serializedSyncedState = JSON.stringify(syncedState);
+      lastSavedState = serializedSyncedState;
+
+      if (serializedSyncedState !== JSON.stringify(state)) {
+        state = syncedState;
+        cacheState();
+        renderBoard();
+      }
+
+      setConnectionStatus("Mit Firebase synchronisiert", "online");
+    }, (error) => {
+      console.error("Firebase-Verbindung fehlgeschlagen:", error);
+      setConnectionStatus("Firebase-Verbindung fehlgeschlagen – lokale Kopie wird angezeigt", "offline");
+    });
+
+    setConnectionStatus("Verbinde mit Firebase...", "syncing");
     renderBoard();
   </script>
 </body>
